@@ -16,7 +16,7 @@ from werkzeug.utils import secure_filename
 # 确保项目根目录在 path 中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from engine.enhancer import METHODS, enhance_image
+from engine.enhancer import METHODS, enhance_image, analyze_image
 from utils.helpers import generate_id, timestamp_str
 
 # ═══════════════════════════════════════════════════════════════
@@ -114,6 +114,9 @@ def api_enhance_image():
     upload_path = os.path.join(UPLOAD_DIR, safe_name)
     file.save(upload_path)
 
+    # get method (defaults to auto)
+    method = request.form.get('method', 'auto')
+
     # 在线程中处理
     def process():
         import cv2
@@ -121,9 +124,10 @@ def api_enhance_image():
             img = cv2.imread(upload_path)
             if img is None:
                 with tasks_lock:
-                    tasks[task_id] = {'status': 'error', 'error': '无法读取图片文件'}
+                    tasks[task_id] = {'status': 'error', 'error': 'Unable to read image'}
                 return
 
+            analysis = analyze_image(img)
             enhanced = enhance_image(img, method)
 
             out_name = f"{task_id}_enhanced.{ext}"
@@ -140,6 +144,14 @@ def api_enhance_image():
                     'original_name': file.filename,
                     'method': method,
                     'method_name': METHODS[method]['name'],
+                    'analysis': {
+                        'mean_lum': round(analysis['mean_lum'], 1),
+                        'median_lum': round(analysis['median_lum'], 1),
+                        'dark_ratio': round(analysis['dark_ratio'], 4),
+                        'contrast': round(analysis['contrast'], 1),
+                        'dyn_range': round(analysis['dyn_range'], 1),
+                        'level': analysis['level'],
+                    },
                 }
         except Exception as e:
             traceback.print_exc()
@@ -170,9 +182,9 @@ def api_enhance_video():
     if not allowed_file(file.filename, ALLOWED_VID):
         return jsonify({'error': f'不支持的视频格式。支持: {", ".join(ALLOWED_VID)}'}), 400
 
-    method = request.form.get('method', 'comprehensive')
+    method = request.form.get('method', 'auto')
     if method not in METHODS:
-        return jsonify({'error': f'未知方法: {method}'}), 400
+        return jsonify({'error': f'Unknown method: {method}'}), 400
 
     task_id = generate_id()
 

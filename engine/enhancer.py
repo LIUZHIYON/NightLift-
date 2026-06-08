@@ -307,6 +307,63 @@ def enhance_dehaze(img: np.ndarray, omega: float = 0.85,
 
 
 # ═══════════════════════════════════════════════════════════════
+# 图像分析器 — 自动检测暗度等级，决定最佳参数
+# ═══════════════════════════════════════════════════════════════
+
+def analyze_image(img: np.ndarray) -> dict:
+    """
+    分析图像的光照状况，返回量化指标。
+
+    指标:
+        mean_lum:     平均亮度 (0-255)
+        median_lum:   中位数亮度 (0-255)
+        dark_ratio:   暗像素占比 (<50), 比例越高越暗
+        contrast:     RMS 对比度
+        dyn_range:    动态范围 (P95 - P5)
+
+    暗度等级判定:
+        极端暗: dark_ratio > 0.7  且 mean_lum < 40
+        很暗:   dark_ratio > 0.5  或 mean_lum < 60
+        偏暗:   dark_ratio > 0.3  或 mean_lum < 90
+        正常:   其余情况
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    mean_lum = float(gray.mean())
+    median_lum = float(np.median(gray))
+    dark_ratio = float((gray < 50).sum() / gray.size)
+    bright_ratio = float((gray > 200).sum() / gray.size)
+
+    # RMS 对比度
+    contrast = float(gray.std())
+
+    # 动态范围
+    low = np.percentile(gray, 5)
+    high = np.percentile(gray, 95)
+    dyn_range = float(high - low)
+
+    # 判定暗度等级
+    if dark_ratio > 0.7 and mean_lum < 40:
+        level = 'extreme'    # 极端低光照
+    elif dark_ratio > 0.5 or mean_lum < 60:
+        level = 'severe'     # 很暗
+    elif dark_ratio > 0.3 or mean_lum < 90:
+        level = 'moderate'   # 偏暗
+    else:
+        level = 'mild'       # 轻微暗/正常
+
+    return {
+        'mean_lum': mean_lum,
+        'median_lum': median_lum,
+        'dark_ratio': dark_ratio,
+        'bright_ratio': bright_ratio,
+        'contrast': contrast,
+        'dyn_range': dyn_range,
+        'level': level,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # 综合增强管线 (推荐使用 — 效果最好)
 # ═══════════════════════════════════════════════════════════════
 
@@ -355,49 +412,119 @@ def enhance_strong(img: np.ndarray) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════
+# 自动模式 — 分析图像后自适应选择最佳参数
+# ═══════════════════════════════════════════════════════════════
+
+def enhance_auto(img: np.ndarray, analysis: dict = None) -> np.ndarray:
+    """
+    一键增强 — 自动分析图像暗度，自适应选择最优参数。
+    用户无需选择任何参数，直接得到最佳结果。
+
+    策略:
+        extreme  极端暗 → 强力管线: MSRCP + 强 CLAHE + 强 Gamma
+        severe   很暗   → 强化管线: Mid CLAHE + Mid Gamma + 锐化
+        moderate 偏暗   → 标准管线: 白平衡 + 轻 CLAHE + 轻 Gamma
+        mild     轻微   → 轻量管线: 仅白平衡 + 轻 CLAHE
+    """
+    if analysis is None:
+        analysis = analyze_image(img)
+
+    level = analysis['level']
+    dark_ratio = analysis['dark_ratio']
+    mean_lum = analysis['mean_lum']
+
+    if level == 'extreme':
+        # 极端暗: 激进提亮，最大化可见度
+        gamma_val = 0.35
+        clahe_clip = 3.0
+        img = auto_white_balance(img)
+        img = enhance_msrcp(img, scales=(8, 50, 150), alpha=160.0, beta=55.0)
+        img = enhance_clahe(img, clip_limit=clahe_clip, tile_grid=(8, 8))
+        img = enhance_gamma(img, gamma=gamma_val)
+
+    elif level == 'severe':
+        # 很暗: 较强提亮
+        gamma_val = 0.45
+        clahe_clip = 2.5
+        img = auto_white_balance(img)
+        img = enhance_clahe(img, clip_limit=clahe_clip, tile_grid=(8, 8))
+        img = enhance_gamma(img, gamma=gamma_val)
+        # 适度锐化
+        blurred = cv2.GaussianBlur(img, (0, 0), 2.5)
+        img = cv2.addWeighted(img, 1.4, blurred, -0.4, 0)
+        img = np.clip(img, 0, 255).astype(np.uint8)
+
+    elif level == 'moderate':
+        # 偏暗: 标准增强
+        gamma_val = 0.55 + dark_ratio * 0.2
+        clahe_clip = 1.5 + dark_ratio * 1.0
+        img = auto_white_balance(img)
+        img = enhance_clahe(img, clip_limit=clahe_clip, tile_grid=(8, 8))
+        img = enhance_gamma(img, gamma=gamma_val)
+        blurred = cv2.GaussianBlur(img, (0, 0), 2.0)
+        img = cv2.addWeighted(img, 1.3, blurred, -0.3, 0)
+        img = np.clip(img, 0, 255).astype(np.uint8)
+
+    else:  # mild
+        # 轻微暗: 轻量处理，避免过曝
+        img = auto_white_balance(img)
+        img = enhance_clahe(img, clip_limit=1.2, tile_grid=(8, 8))
+        gamma_val = 0.75
+        if mean_lum < 100:
+            img = enhance_gamma(img, gamma=gamma_val)
+
+    return img
+
+
+# ═══════════════════════════════════════════════════════════════
 # 方法注册表
 # ═══════════════════════════════════════════════════════════════
 
 METHODS = {
+    'auto': {
+        'name': 'Auto (一键增强)',
+        'func': enhance_auto,
+        'desc': '自动分析暗度，自适应选择最佳参数，一键出结果',
+    },
     'comprehensive': {
-        'name': '⭐ 综合增强 (推荐)',
+        'name': 'Comprehensive',
         'func': enhance_comprehensive,
-        'desc': '自动白平衡 + CLAHE + Gamma + 锐化，效果最全面',
+        'desc': '自动白平衡 + CLAHE + Gamma + 锐化',
     },
     'strong': {
-        'name': '🔥 强力增强',
+        'name': 'Strong',
         'func': enhance_strong,
         'desc': 'MSRCP + CLAHE + Gamma，针对极端低光照',
     },
     'clahe': {
-        'name': 'CLAHE 自适应均衡',
+        'name': 'CLAHE',
         'func': lambda img: enhance_clahe(img, clip_limit=2.0, tile_grid=(8, 8)),
-        'desc': 'LAB 空间 L 通道 CLAHE，最经典的方法',
+        'desc': 'LAB 空间 L 通道 CLAHE',
     },
     'msrcp': {
-        'name': 'MSRCP 多尺度 Retinex',
+        'name': 'MSRCP',
         'func': lambda img: enhance_msrcp(img),
-        'desc': '色彩保持的多尺度 Retinex，细节恢复好',
+        'desc': '色彩保持的多尺度 Retinex',
     },
     'gamma': {
-        'name': 'Gamma 校正',
+        'name': 'Gamma',
         'func': lambda img: enhance_gamma(img, gamma=0.4),
-        'desc': '非线性亮度提升，简单有效',
+        'desc': '非线性亮度提升',
     },
     'dehaze': {
-        'name': '暗通道先验去雾',
+        'name': 'Dehaze',
         'func': lambda img: enhance_dehaze(img),
-        'desc': '基于暗通道先验，提升对比度和可见度',
+        'desc': '暗通道先验去雾',
     },
     'auto_levels': {
-        'name': '自动色阶拉伸',
+        'name': 'Auto Levels',
         'func': lambda img: enhance_auto_levels(img),
-        'desc': '直方图拉伸到全范围',
+        'desc': '直方图拉伸',
     },
     'ssr': {
-        'name': '单尺度 Retinex',
+        'name': 'SSR',
         'func': lambda img: enhance_ssr(img, sigma=80.0),
-        'desc': '单尺度 Retinex，速度快',
+        'desc': '单尺度 Retinex',
     },
 }
 

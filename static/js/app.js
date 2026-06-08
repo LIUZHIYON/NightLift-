@@ -1,23 +1,16 @@
 /**
- * 低光照增强系统 — 前端交互逻辑
+ * Low-Light Enhancement — Frontend
+ * One-click: upload → auto analyze → enhance → download
  */
 
-// ═══════════════════════════════════════════════════════════════
-// 状态
-// ═══════════════════════════════════════════════════════════════
 const state = {
     file: null,
-    selectedMethod: 'comprehensive',
     taskId: null,
     pollTimer: null,
     isProcessing: false,
 };
 
-// ═══════════════════════════════════════════════════════════════
-// DOM 引用
-// ═══════════════════════════════════════════════════════════════
 const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => document.querySelectorAll(sel);
 
 const dom = {
     uploadArea: $('#uploadArea'),
@@ -28,8 +21,9 @@ const dom = {
     fileName: $('#fileName'),
     fileSize: $('#fileSize'),
     changeBtn: $('#changeBtn'),
-    methodGrid: $('#methodGrid'),
     processBtn: $('#processBtn'),
+    analyzeSection: $('#analyzeSection'),
+    analyzeGrid: $('#analyzeGrid'),
     progressSection: $('#progressSection'),
     progressFill: $('#progressFill'),
     progressText: $('#progressText'),
@@ -42,91 +36,54 @@ const dom = {
     retryBtn: $('#retryBtn'),
 };
 
-// ═══════════════════════════════════════════════════════════════
-// 文件选择
-// ═══════════════════════════════════════════════════════════════
-
+// ── file selection ──
 dom.selectBtn.addEventListener('click', () => dom.fileInput.click());
-dom.uploadArea.addEventListener('click', (e) => {
-    if (e.target !== dom.selectBtn) dom.fileInput.click();
-});
+dom.uploadArea.addEventListener('click', (e) => { if (e.target !== dom.selectBtn) dom.fileInput.click(); });
 dom.fileInput.addEventListener('change', handleFileSelect);
 
-// 拖放支持
-dom.uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dom.uploadArea.classList.add('drag-over');
-});
-dom.uploadArea.addEventListener('dragleave', () => {
-    dom.uploadArea.classList.remove('drag-over');
-});
+dom.uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.uploadArea.classList.add('drag-over'); });
+dom.uploadArea.addEventListener('dragleave', () => dom.uploadArea.classList.remove('drag-over'));
 dom.uploadArea.addEventListener('drop', (e) => {
     e.preventDefault();
     dom.uploadArea.classList.remove('drag-over');
-    const files = e.dataTransfer.files;
-    if (files.length > 0) setFile(files[0]);
+    if (e.dataTransfer.files.length > 0) setFile(e.dataTransfer.files[0]);
 });
-
-dom.changeBtn.addEventListener('click', () => {
-    dom.fileInput.value = '';
-    dom.fileInput.click();
-});
+dom.changeBtn.addEventListener('click', () => { dom.fileInput.value = ''; dom.fileInput.click(); });
 
 function handleFileSelect(e) {
-    const files = e.target.files;
-    if (files.length > 0) setFile(files[0]);
+    if (e.target.files.length > 0) setFile(e.target.files[0]);
 }
 
 function setFile(file) {
     state.file = file;
     dom.fileName.textContent = file.name;
     dom.fileSize.textContent = formatSize(file.size);
-
-    const isVideo = file.type.startsWith('video/');
-    dom.fileIcon.textContent = isVideo ? '🎬' : '🖼️';
+    dom.fileIcon.textContent = file.type.startsWith('video/') ? 'V' : 'I';
 
     dom.uploadArea.classList.add('hidden');
     dom.filePreview.classList.remove('hidden');
     dom.processBtn.disabled = false;
-    dom.processBtn.textContent = isVideo ? '🚀 开始增强视频' : '🚀 开始增强图片';
-
-    // 重置结果
+    dom.processBtn.textContent = 'Enhance';
     resetResults();
 }
 
 function formatSize(bytes) {
     const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
+    let s = bytes;
     for (const u of units) {
-        if (size < 1024) return `${size.toFixed(1)} ${u}`;
-        size /= 1024;
+        if (s < 1024) return `${s.toFixed(1)} ${u}`;
+        s /= 1024;
     }
-    return `${size.toFixed(1)} TB`;
+    return `${s.toFixed(1)} TB`;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 方法选择
-// ═══════════════════════════════════════════════════════════════
-
-dom.methodGrid.addEventListener('click', (e) => {
-    const card = e.target.closest('.method-card');
-    if (!card) return;
-    dom.methodGrid.querySelectorAll('.method-card').forEach(c => c.classList.remove('selected'));
-    card.classList.add('selected');
-    state.selectedMethod = card.dataset.method;
-});
-
-// ═══════════════════════════════════════════════════════════════
-// 开始处理
-// ═══════════════════════════════════════════════════════════════
-
+// ── one-click processing ──
 dom.processBtn.addEventListener('click', startProcessing);
 dom.retryBtn.addEventListener('click', startProcessing);
 dom.newTaskBtn.addEventListener('click', resetAll);
 
 async function startProcessing() {
     if (!state.file || state.isProcessing) return;
-
     state.isProcessing = true;
     dom.processBtn.disabled = true;
     resetResults();
@@ -134,118 +91,119 @@ async function startProcessing() {
     const isVideo = state.file.type.startsWith('video/');
     const endpoint = isVideo ? '/api/enhance/video' : '/api/enhance/image';
 
-    // 显示进度
+    // show progress
     dom.progressSection.classList.remove('hidden');
-    dom.progressFill.style.width = '10%';
-    dom.progressText.textContent = '正在上传...';
+    dom.progressFill.style.width = '5%';
+    dom.progressText.textContent = 'Uploading...';
 
     const formData = new FormData();
     formData.append('file', state.file);
-    formData.append('method', state.selectedMethod);
 
     try {
         const resp = await fetch(endpoint, { method: 'POST', body: formData });
         const data = await resp.json();
-
-        if (data.error) {
-            showError(data.error);
-            return;
-        }
+        if (data.error) { showError(data.error); return; }
 
         state.taskId = data.task_id;
         pollTask();
     } catch (err) {
-        showError('上传失败: ' + err.message);
+        showError('Upload failed: ' + err.message);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 轮询任务状态
-// ═══════════════════════════════════════════════════════════════
-
+// ── poll ──
 function pollTask() {
     if (!state.taskId) return;
-
     state.pollTimer = setInterval(async () => {
         try {
             const resp = await fetch(`/api/task/${state.taskId}`);
             const data = await resp.json();
-
             if (data.status === 'error') {
                 clearInterval(state.pollTimer);
                 showError(data.error);
                 return;
             }
-
             if (data.status === 'processing') {
                 const pct = data.progress_pct || 10;
                 dom.progressFill.style.width = Math.min(pct, 90) + '%';
-                if (data.progress) {
-                    dom.progressText.textContent = `已处理 ${data.progress} 帧...`;
-                } else {
-                    dom.progressText.textContent = '正在增强...';
-                }
+                dom.progressText.textContent = data.progress ? `Frames: ${data.progress}` : 'Enhancing...';
                 return;
             }
-
             if (data.status === 'done') {
                 clearInterval(state.pollTimer);
                 dom.progressFill.style.width = '100%';
-                dom.progressText.textContent = '处理完成！';
+                dom.progressText.textContent = 'Done!';
                 setTimeout(() => showResult(data), 400);
                 return;
             }
         } catch (err) {
             clearInterval(state.pollTimer);
-            showError('查询状态失败: ' + err.message);
+            showError('Poll failed: ' + err.message);
         }
     }, 800);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 显示结果
-// ═══════════════════════════════════════════════════════════════
-
+// ── result ──
 function showResult(data) {
     dom.progressSection.classList.add('hidden');
     dom.resultSection.classList.remove('hidden');
 
-    const isVideo = data.enhanced.endsWith('.mp4') ||
-                    /\.(avi|mov|mkv|webm)/i.test(data.enhanced);
+    const isVideo = /\.(mp4|avi|mov|mkv|webm)/i.test(data.enhanced);
 
     dom.resultContainer.innerHTML = '';
 
-    // 原始文件
     const origPane = document.createElement('div');
     origPane.className = 'result-pane';
-    origPane.innerHTML = `<h3>📥 原始文件</h3>` + mediaEl(data.original, isVideo);
+    origPane.innerHTML = '<h3>Original</h3>' + mediaEl(data.original, isVideo);
     dom.resultContainer.appendChild(origPane);
 
-    // 增强文件
     const enhPane = document.createElement('div');
     enhPane.className = 'result-pane';
-    enhPane.innerHTML = `<h3>✨ 增强结果 (${data.method_name})</h3>` + mediaEl(data.enhanced, isVideo);
+    enhPane.innerHTML = `<h3>Enhanced (Auto)</h3>` + mediaEl(data.enhanced, isVideo);
     dom.resultContainer.appendChild(enhPane);
 
-    // 下载按钮
+    // also update compare view if it's an image
+    if (!isVideo) {
+        const cmpSection = $('#compareSection');
+        cmpSection.classList.remove('hidden');
+        $('#compareOriginal').src = data.original;
+        $('#compareEnhanced').src = data.enhanced;
+    }
+
     dom.downloadBtn.href = data.enhanced;
     dom.downloadBtn.download = data.enhanced.split('/').pop();
+
+    // show analysis if available
+    if (data.analysis) {
+        renderAnalysis(data.analysis);
+    }
 
     state.isProcessing = false;
     dom.processBtn.disabled = false;
 }
 
 function mediaEl(src, isVideo) {
-    if (isVideo) {
-        return `<video controls src="${src}"></video>`;
-    }
-    return `<img src="${src}" alt="增强结果">`;
+    return isVideo ? `<video controls src="${src}"></video>` : `<img src="${src}" alt="">`;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 错误
-// ═══════════════════════════════════════════════════════════════
+function renderAnalysis(analysis) {
+    const section = $('#analyzeSection');
+    section.classList.remove('hidden');
+    const grid = $('#analyzeGrid');
+    const lvlClass = 'level-' + analysis.level;
+    const lvlLabels = { extreme: 'Extreme - very dark', severe: 'Very dark', moderate: 'Slightly dark', mild: 'Normal / Slight' };
 
+    grid.innerHTML = `
+        <div class="analyze-item"><div class="analyze-label">Mean Lum</div><div class="analyze-value">${analysis.mean_lum.toFixed(1)}</div></div>
+        <div class="analyze-item"><div class="analyze-label">Median Lum</div><div class="analyze-value">${analysis.median_lum.toFixed(1)}</div></div>
+        <div class="analyze-item"><div class="analyze-label">Dark Pixels</div><div class="analyze-value">${(analysis.dark_ratio*100).toFixed(1)}%</div></div>
+        <div class="analyze-item"><div class="analyze-label">Contrast</div><div class="analyze-value">${analysis.contrast.toFixed(1)}</div></div>
+        <div class="analyze-item"><div class="analyze-label">Dynamic Range</div><div class="analyze-value">${analysis.dyn_range.toFixed(1)}</div></div>
+        <div class="analyze-level ${lvlClass}">${lvlLabels[analysis.level] || analysis.level}</div>
+    `;
+}
+
+// ── error ──
 function showError(msg) {
     dom.progressSection.classList.add('hidden');
     dom.resultSection.classList.add('hidden');
@@ -255,18 +213,14 @@ function showError(msg) {
     dom.processBtn.disabled = false;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 重置
-// ═══════════════════════════════════════════════════════════════
-
+// ── reset ──
 function resetResults() {
-    if (state.pollTimer) {
-        clearInterval(state.pollTimer);
-        state.pollTimer = null;
-    }
+    if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
     dom.progressSection.classList.add('hidden');
     dom.resultSection.classList.add('hidden');
     dom.errorSection.classList.add('hidden');
+    dom.compareSection?.classList?.add('hidden');
+    dom.analyzeSection.classList.add('hidden');
 }
 
 function resetAll() {
@@ -278,5 +232,5 @@ function resetAll() {
     dom.uploadArea.classList.remove('hidden');
     dom.filePreview.classList.add('hidden');
     dom.processBtn.disabled = true;
-    dom.processBtn.textContent = '🚀 开始增强';
+    dom.processBtn.textContent = 'Enhance';
 }
