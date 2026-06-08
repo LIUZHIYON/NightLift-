@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+output/images/*
+output/videos/*
+static/uploads/*
+.env
+.idea/
+.vscode/
+*.code-workspace
