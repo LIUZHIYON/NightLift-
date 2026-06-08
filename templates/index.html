@@ -96,6 +96,21 @@
         <p>OpenCV-based | Auto parameter selection | Local processing, no upload</p>
     </footer>
 
+    <!-- 灯箱：图片放大查看 -->
+    <div class="lightbox hidden" id="lightbox">
+        <div class="lightbox-bg" id="lightboxBg"></div>
+        <button class="lightbox-close" id="lightboxClose">&times;</button>
+        <button class="lightbox-nav lightbox-prev" id="lightboxPrev">&lsaquo;</button>
+        <button class="lightbox-nav lightbox-next" id="lightboxNext">&rsaquo;</button>
+        <div class="lightbox-content">
+            <img id="lightboxImg" alt="">
+            <div class="lightbox-label" id="lightboxLabel"></div>
+        </div>
+        <div class="lightbox-hint">
+            ← →  &nbsp;Switch&nbsp; | &nbsp;ESC&nbsp; Close
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

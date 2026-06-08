@@ -234,3 +234,105 @@ function resetAll() {
     dom.processBtn.disabled = true;
     dom.processBtn.textContent = 'Enhance';
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Lightbox — click to zoom, arrow keys to switch, ESC to close
+// ═══════════════════════════════════════════════════════════════
+
+const lightbox = {
+    images: [],      // [{src, label}]
+    index: 0,
+    el: {
+        box: $('#lightbox'),
+        bg: $('#lightboxBg'),
+        img: $('#lightboxImg'),
+        label: $('#lightboxLabel'),
+        close: $('#lightboxClose'),
+        prev: $('#lightboxPrev'),
+        next: $('#lightboxNext'),
+    },
+    open(images, startIdx) {
+        if (!images.length) return;
+        this.images = images;
+        this.index = Math.max(0, Math.min(startIdx, images.length - 1));
+        this.render();
+        this.el.box.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    },
+    close() {
+        this.el.box.classList.add('hidden');
+        document.body.style.overflow = '';
+        this.images = [];
+    },
+    render() {
+        const cur = this.images[this.index];
+        this.el.img.src = cur.src;
+        this.el.label.textContent = cur.label;
+        this.el.prev.style.visibility = this.images.length > 1 ? '' : 'hidden';
+        this.el.next.style.visibility = this.images.length > 1 ? '' : 'hidden';
+    },
+    prev() {
+        if (this.images.length <= 1) return;
+        this.index = (this.index - 1 + this.images.length) % this.images.length;
+        this.render();
+    },
+    next() {
+        if (this.images.length <= 1) return;
+        this.index = (this.index + 1) % this.images.length;
+        this.render();
+    },
+};
+
+// click events
+lightbox.el.close.addEventListener('click', () => lightbox.close());
+lightbox.el.bg.addEventListener('click', () => lightbox.close());
+lightbox.el.prev.addEventListener('click', (e) => { e.stopPropagation(); lightbox.prev(); });
+lightbox.el.next.addEventListener('click', (e) => { e.stopPropagation(); lightbox.next(); });
+lightbox.el.img.addEventListener('click', (e) => { e.stopPropagation(); });
+
+// keyboard
+document.addEventListener('keydown', (e) => {
+    if (lightbox.el.box.classList.contains('hidden')) return;
+    if (e.key === 'Escape') { lightbox.close(); return; }
+    if (e.key === 'ArrowLeft') { lightbox.prev(); return; }
+    if (e.key === 'ArrowRight') { lightbox.next(); return; }
+});
+
+// ── bind lightbox to result images & compare images ──
+function initLightboxTriggers() {
+    // Bind to result panes — delegate from resultContainer
+    const resultContainer = $('#resultContainer');
+    resultContainer.addEventListener('click', (e) => {
+        const img = e.target.closest('img');
+        if (!img) return;
+        const pane = img.closest('.result-pane');
+        const h3 = pane ? pane.querySelector('h3') : null;
+        const label = h3 ? h3.textContent : 'Image';
+
+        // collect all images currently in result
+        const imgs = [...resultContainer.querySelectorAll('img')];
+        const list = imgs.map((el, i) => ({
+            src: el.src,
+            label: el.closest('.result-pane')?.querySelector('h3')?.textContent || `Image ${i + 1}`,
+        }));
+        const idx = imgs.indexOf(img);
+        lightbox.open(list, idx >= 0 ? idx : 0);
+    });
+
+    // Bind to compare section
+    const compareSection = $('#compareSection');
+    compareSection.addEventListener('click', (e) => {
+        const img = e.target.closest('img');
+        if (!img) return;
+        const imgs = [...compareSection.querySelectorAll('img')];
+        const list = imgs.map((el, i) => ({
+            src: el.src,
+            label: el.closest('.compare-pane')?.querySelector('h3')?.textContent || `Image ${i + 1}`,
+        }));
+        const idx = imgs.indexOf(img);
+        lightbox.open(list, idx >= 0 ? idx : 0);
+    });
+}
+
+// call once on page load
+initLightboxTriggers();
